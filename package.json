@@ -1,0 +1,22 @@
+{
+  "name": "mini-claude",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mini Claude - a cute orange Claude desktop pet that shows your Claude usage",
+  "type": "module",
+  "scripts": {
+    "usage": "node data/estimate.mjs",
+    "serve": "node tools/serve.mjs",
+    "icon": "node tools/make-icon.mjs && tauri icon src-tauri/icon-source.png",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "frames": "node tools/extract-frames.mjs",
+    "showcase": "node tools/make-showcase.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "pngjs": "^7.0.0"
+  },
+  "author": "Taian Adrian",
+  "license": "MIT"
+}

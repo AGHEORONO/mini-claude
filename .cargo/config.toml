@@ -1,0 +1,1 @@
+# No custom rustflags — #![windows_subsystem = "windows"] in main.rs handles no-console.

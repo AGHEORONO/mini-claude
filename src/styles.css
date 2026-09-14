@@ -1,0 +1,340 @@
+:root {
+  /* Claude brand palette */
+  --terracotta-deep: #a84a2a;
+  --cream: #f0eee6;
+  --ink: #3d3d3a;
+  --ink-soft: #595954;
+  --danger: #a93226;
+
+  --bar-5h: #d97757;
+  --bar-week: #a86a3e;
+  --bar-opus: #8c6bd9;
+  --bar-track: rgba(61, 61, 58, 0.3);
+
+  --pet-w: 96px;
+  --pet-h: 96px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  /* transparent so the native window shows only the pet */
+  background: transparent;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* Visible only to assistive technology. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Pet container ---------- */
+/* The character is first in the DOM so Tab reaches the panel it opens;
+   column-reverse puts it back underneath visually. */
+.pet {
+  position: absolute;
+  left: 40px;
+  top: 40px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* In the Tauri pet window: anchor to bottom-left, dialog grows upward */
+/* The sprite carries its own margin via .character padding, so the window can
+   hug the content and block as little of the desktop as possible. */
+body.tauri .pet {
+  left: 4px;
+  top: auto;
+  bottom: 4px;
+}
+
+/* ---------- Character ---------- */
+/* The box is deliberately larger than the sprite: bob, breathe and lean all
+   move pixels outside the grid, and the native window is sized from this box,
+   so the padding is what stops the pet being clipped. */
+.character {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  display: block;
+  width: calc(var(--pet-w) + 28px);
+  height: calc(var(--pet-h) + 30px);
+  padding: 18px 14px 12px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Gives the body layer's rotateX/rotateY real depth instead of a flat skew. */
+  perspective: 340px;
+}
+.character:active { cursor: grabbing; }
+
+.char-svg {
+  position: absolute;
+  inset: 18px 14px 12px;   /* matches .character padding */
+  width: var(--pet-w);
+  height: var(--pet-h);
+  overflow: visible;
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+  pointer-events: none;
+}
+.char-svg * { pointer-events: none; }
+
+/* Pivot at his feet: squash and lean then push against the ground. */
+.char-svg--body {
+  transform-origin: 50% 92%;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+/* The ground shadow stays flat on the desktop and never rotates with the body. */
+.char-svg--shadow { transform-origin: 50% 100%; }
+
+/* A dark ring alone can vanish against a dark wallpaper and a white one
+   against a light wallpaper, so the indicator carries both. */
+.character:focus-visible {
+  outline: 3px solid #1a1a1a;
+  outline-offset: 2px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 6px #ffffff;
+}
+
+/* ---------- Right-click menu ---------- */
+.menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 148px;
+  background: var(--cream);
+  border: 3px solid var(--ink);
+  box-shadow: 5px 5px 0 rgba(40, 25, 15, 0.35);
+  padding: 3px;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", "Courier New", monospace;
+}
+.menu[hidden] { display: none; }
+.menu__item {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink);
+}
+.menu__item:hover { background: rgba(217, 119, 87, 0.22); }
+.menu__item:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* ---------- Dialog ---------- */
+/* Fixed width on purpose: the native window sizes itself to this panel, so a
+   viewport-relative width would feed back into its own input and collapse. */
+.dialog {
+  width: 252px;
+  background: var(--cream);
+  border: 3px solid var(--ink);
+  border-radius: 0;                                /* hard pixel corners */
+  box-shadow: 6px 6px 0 rgba(40, 25, 15, 0.35);    /* solid offset, no blur */
+  padding: 10px 12px 9px;
+  color: var(--ink);
+  /* readable mono keeps the retro look without hurting legibility */
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", "Courier New", monospace;
+  transform-origin: bottom left;
+  animation: pop 0.12s steps(3, end);
+}
+.dialog[hidden] { display: none; }
+/* In a plain browser there is no self-sizing window, so the panel may clamp. */
+body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
+
+@keyframes pop {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dialog__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+}
+.dialog__title {
+  margin: 0 auto 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--terracotta-deep);
+}
+
+/* 26px minimum keeps every control above the 24x24 target floor. */
+.dialog__btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  border: 2px solid var(--ink);
+  background: var(--cream);
+}
+.dialog__btn:hover { background: rgba(217, 119, 87, 0.2); }
+.dialog__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.dialog__btn[aria-pressed="true"] {
+  background: var(--terracotta-deep);
+  color: #fff;
+  /* The emoji glyphs keep their own colour, so pressed also needs a shape cue. */
+  box-shadow: inset 0 0 0 2px var(--cream);
+}
+
+/* Activity dot: colour plus a filled/hollow shape, never colour alone.
+   The accessible state lives in #activityText. */
+.activity-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 2px solid var(--ink);
+  transition: background 0.3s;
+}
+.activity-dot.is-active { background: #1e8449; box-shadow: inset 0 0 0 1px var(--cream); }
+
+.bars { display: flex; flex-direction: column; gap: 9px; }
+
+.bar { display: flex; flex-direction: column; gap: 3px; }
+.bar__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+}
+.bar__label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.bar__pct { font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.bar__track {
+  height: 12px;
+  background: var(--bar-track);
+  border: 2px solid var(--ink);
+  overflow: hidden;
+  image-rendering: pixelated;
+}
+.bar__fill {
+  position: relative;
+  height: 100%;
+  width: 0%;
+  /* chunky, stepped growth instead of a smooth slide */
+  transition: width 0.25s steps(10, end);
+}
+/* pixel segment ticks on top of whatever colour the fill is */
+.bar__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    90deg, rgba(255, 255, 255, 0.28) 0 2px, transparent 2px 6px);
+}
+.bar__reset { font-size: 11px; color: var(--ink-soft); }
+.bar.is-danger .bar__pct { color: var(--danger); font-weight: 700; }
+/* Diagonal hatching marks the danger state without relying on colour. */
+.bar.is-danger .bar__fill::after {
+  background-image: repeating-linear-gradient(
+    135deg, rgba(255, 255, 255, 0.55) 0 3px, transparent 3px 7px);
+}
+
+/* Token counter. A button because it toggles month / all time, but it has to
+   sit flush with the bars above it rather than look like a control. */
+.stat {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 8px;
+  cursor: pointer;
+  border: 2px solid var(--ink);
+  background: rgba(61, 61, 58, 0.06);
+}
+.stat:hover { background: rgba(217, 119, 87, 0.16); }
+.stat:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.stat__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.stat__label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat__value { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat__note { font-size: 11px; color: var(--ink-soft); }
+
+.dialog__foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 2px solid var(--ink);
+}
+.dialog__source {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+  /* The usage numbers are worth copying; the sprite is not. */
+  user-select: text;
+  -webkit-user-select: text;
+}
+.bars { user-select: text; -webkit-user-select: text; }
+
+/* ---------- Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .dialog { animation: none; }
+  .bar__fill { transition: none; }
+  .activity-dot { transition: none; }
+}
+
+/* ---------- Windows High Contrast ---------- */
+@media (forced-colors: active) {
+  .menu { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .menu__item { color: CanvasText; }
+  .menu__item:hover { background: Highlight; color: HighlightText; }
+  .menu__item:focus-visible { outline: 3px solid Highlight; }
+  .stat { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  .stat:focus-visible { outline: 3px solid Highlight; }
+  .dialog { background: Canvas; color: CanvasText; border-color: CanvasText; box-shadow: none; }
+  .dialog__title { color: CanvasText; }
+  .dialog__btn { border-color: ButtonText; color: ButtonText; background: ButtonFace; }
+  .dialog__btn[aria-pressed="true"] { background: Highlight; color: HighlightText; }
+  .dialog__btn:focus-visible,
+  .character:focus-visible { outline: 3px solid Highlight; box-shadow: none; }
+  .bar__track { border-color: CanvasText; background: Canvas; }
+  /* forced-colors does not touch SVG fill attributes, so the bar fills are
+     repainted here to stay visible next to a recoloured panel. */
+  .bar__fill { background: Highlight !important; }
+  .bar__fill::after { background-image: none; }
+  .activity-dot { border-color: CanvasText; }
+  .activity-dot.is-active { background: Highlight; }
+}

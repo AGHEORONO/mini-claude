@@ -1,0 +1,2 @@
+# No custom rustflags needed — #![windows_subsystem = "windows"] in main.rs
+# handles the no-console-window requirement for the final binary.

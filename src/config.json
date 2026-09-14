@@ -1,0 +1,17 @@
+{
+  "_comment": "Ponderi si limite pentru estimarea locala din ~/.claude/projects. Folosite DOAR cand API-ul real nu raspunde: barele 5h si Weekly vin din headerele anthropic-ratelimit-*, care sunt exacte, iar Weekly Opus se deriva din procentul saptamanal real inmultit cu ponderea Opus din consumul local. Limitele de mai jos au fost calibrate pe 2026-09-14 fata de headerele reale (inainte erau de ~3.7x prea mici, ceea ce arunca barele la 100%+). Recalibreaza rulind /usage in Claude Code si comparind. Suprascrie fara rebuild in ~/.mini-claude/config.json.",
+  "limits": {
+    "5h": 15000000,
+    "week": 100000000,
+    "opus": 100000000
+  },
+  "weights": {
+    "input": 1,
+    "output": 5,
+    "cacheWrite": 1.25,
+    "cacheRead": 0.1
+  },
+  "pollSeconds": 300,
+  "dangerPct": 90,
+  "exhaustedPct": 99
+}

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Claude</title>
+  <link rel="stylesheet" href="styles.css?v=4" />
+</head>
+<body>
+  <!-- Single persistent status region. It must exist at load, stay empty and
+       never be hidden, or threshold announcements are unreliable. -->
+  <div id="liveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <div id="pet" class="pet">
+
+    <!-- The trigger comes first in the DOM so Tab reaches the panel it opens.
+         CSS (column-reverse) puts it back below the panel visually. -->
+    <button id="character" class="character" type="button"
+            aria-expanded="false" aria-controls="dialog"
+            aria-label="Mini Claude, Claude usage"
+            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight">
+      <svg class="char-svg char-svg--shadow" viewBox="0 0 88 88" aria-hidden="true" focusable="false">
+        <g id="charShadow"></g>
+      </svg>
+      <svg class="char-svg char-svg--body" viewBox="0 0 88 88" aria-hidden="true" focusable="false">
+        <g id="body"></g>
+      </svg>
+    </button>
+
+    <!-- Right-click menu. It lives in the flow rather than at the pointer
+         because the native window is sized to its contents; anything
+         absolutely positioned would be clipped by the window edge. -->
+    <div id="menu" class="menu" role="menu" aria-label="Mini Claude actions" hidden>
+      <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="sit">Sit</button>
+      <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="usage">Show usage</button>
+      <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="motion">Pause motion</button>
+    </div>
+
+    <section id="dialog" class="dialog" aria-labelledby="dialogTitle" hidden>
+      <header class="dialog__head">
+        <span id="activityDot" class="activity-dot" aria-hidden="true"></span>
+        <span id="activityText" class="sr-only">Claude Code idle</span>
+        <h1 id="dialogTitle" class="dialog__title">Claude usage</h1>
+        <button id="autostartBtn" class="dialog__btn" type="button"
+                data-tip="Start with Windows" aria-pressed="false"
+                aria-label="Start with Windows"><span aria-hidden="true">⚡</span></button>
+        <button id="pinBtn" class="dialog__btn" type="button"
+                data-tip="Keep open" aria-pressed="false"
+                aria-label="Keep open"><span aria-hidden="true">📌</span></button>
+        <button id="closeBtn" class="dialog__btn" type="button"
+                data-tip="Close" aria-label="Close"><span aria-hidden="true">✕</span></button>
+      </header>
+
+      <div id="bars" class="bars"></div>
+
+      <button id="tokens" class="stat" type="button">
+        <span class="stat__top">
+          <span id="tokensLabel" class="stat__label" aria-hidden="true">Tokens</span>
+          <span id="tokensValue" class="stat__value" aria-hidden="true">—</span>
+        </span>
+        <span id="tokensNote" class="stat__note" aria-hidden="true"></span>
+      </button>
+
+      <footer class="dialog__foot">
+        <span id="source" class="dialog__source">…</span>
+        <button id="motionBtn" class="dialog__btn" type="button"
+                data-tip="Pause animation" aria-pressed="false"
+                aria-label="Pause animation"><span aria-hidden="true">⏸</span></button>
+        <button id="refreshBtn" class="dialog__btn" type="button"
+                data-tip="Refresh" aria-label="Refresh"><span aria-hidden="true">↻</span></button>
+      </footer>
+    </section>
+
+  </div>
+
+  <script src="frames.js?v=4"></script>
+  <script src="pixel.js?v=4"></script>
+  <script src="native.js?v=4"></script>
+  <script type="module" src="app.js?v=4"></script>
+</body>
+</html>

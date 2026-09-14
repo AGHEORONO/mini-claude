@@ -1,0 +1,114 @@
+{
+  "grid": {
+    "cols": 11,
+    "rows": 10
+  },
+  "scale": 20,
+  "size": {
+    "w": 220,
+    "h": 200
+  },
+  "colors": {
+    "body": "#ee6a4d",
+    "eyes": "#1a1a1a",
+    "shadow": "rgba(26,26,26,0.20)"
+  },
+  "animations": [
+    {
+      "name": "idle",
+      "label": "Idle (respiră / clipește)",
+      "fps": 6,
+      "count": 10
+    },
+    {
+      "name": "blink",
+      "label": "Blink",
+      "fps": 12,
+      "count": 4
+    },
+    {
+      "name": "look",
+      "label": "Look around (curios)",
+      "fps": 4,
+      "count": 6
+    },
+    {
+      "name": "stretch",
+      "label": "Fidget: stretch",
+      "fps": 5,
+      "count": 7
+    },
+    {
+      "name": "scratch",
+      "label": "Fidget: scratch",
+      "fps": 6,
+      "count": 6
+    },
+    {
+      "name": "wiggle",
+      "label": "Fidget: wiggle",
+      "fps": 14,
+      "count": 6
+    },
+    {
+      "name": "walk",
+      "label": "Walk",
+      "fps": 8,
+      "count": 4
+    },
+    {
+      "name": "drag",
+      "label": "Drag (tras pe ecran)",
+      "fps": 9,
+      "count": 6
+    },
+    {
+      "name": "work_think",
+      "label": "Working: think",
+      "fps": 6,
+      "count": 8
+    },
+    {
+      "name": "work_write",
+      "label": "Working: write",
+      "fps": 9,
+      "count": 6
+    },
+    {
+      "name": "work_process",
+      "label": "Working: process",
+      "fps": 8,
+      "count": 6
+    },
+    {
+      "name": "done",
+      "label": "Done / success",
+      "fps": 10,
+      "count": 8
+    },
+    {
+      "name": "error",
+      "label": "Error / stuck",
+      "fps": 12,
+      "count": 6
+    },
+    {
+      "name": "tired",
+      "label": "Tired / low limit",
+      "fps": 3,
+      "count": 5
+    },
+    {
+      "name": "hover",
+      "label": "Hover (perk up)",
+      "fps": 10,
+      "count": 4
+    },
+    {
+      "name": "click",
+      "label": "Click (bounce)",
+      "fps": 12,
+      "count": 5
+    }
+  ]
+}
