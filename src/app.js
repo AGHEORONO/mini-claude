@@ -191,6 +191,8 @@ let cryTimer = null;
 // Out of tokens. Unlike the sulk, this one is a fact about the world: no
 // amount of petting makes it stop, only the limit resetting does.
 let exhausted = false;
+// Being carried outranks every mood: he is in the air, he should look like it.
+let isDragging = false;
 
 // The clip he settles back into once a one-shot animation finishes.
 function restClip() {
@@ -386,7 +388,7 @@ function applyData(data, { show = false } = {}) {
   const empty = data.limits.some((l) => l.pct != null && l.pct >= EXHAUSTED_PCT);
   if (empty !== exhausted) {
     exhausted = empty;
-    window.clawd?.play(empty ? 'cry' : restClip());
+    if (!isDragging) window.clawd?.play(empty ? 'cry' : restClip());
     const hit = data.limits.filter((l) => l.pct != null && l.pct >= EXHAUSTED_PCT);
     announce(empty
       ? `${hit.map((l) => l.label).join(' and ')} limit reached.`
@@ -399,13 +401,13 @@ function applyData(data, { show = false } = {}) {
     if (!suppressAutoOpen) setDialogOpen(true);
     if (!wasTired) {
       wasTired = true;
-      if (!isWorking && !sitting && !exhausted) window.clawd?.play('tired');
+      if (!isWorking && !sitting && !exhausted && !isDragging) window.clawd?.play('tired');
     }
   } else {
     suppressAutoOpen = false;
     if (wasTired) {
       wasTired = false;
-      if (!isWorking && !sitting && !exhausted) window.clawd?.idle();
+      if (!isWorking && !sitting && !exhausted && !isDragging) window.clawd?.idle();
     }
     if (show) setDialogOpen(true);
   }
@@ -447,7 +449,7 @@ async function listenNative() {
       if (active) {
         // Deliberately not nudge(): Claude Code running is not the user
         // paying attention to the pet, so it must not reset the cry timer.
-        if (!isWorking && !sitting && !exhausted) {
+        if (!isWorking && !sitting && !exhausted && !isDragging) {
           isWorking = true;
           // Working wins over every other state. It used to be gated behind
           // `!wasTired`, which meant that once usage crossed the danger line
@@ -535,9 +537,20 @@ character.addEventListener('click', () => {
   if (dialog.hidden) refresh({ show: true }); else dismiss();
 });
 
-// native.js owns the OS-level drag but not the pet's state, so it just says
-// when the drag ended.
+// native.js owns the OS-level drag but not the pet's state, so it only reports
+// the boundaries and the mood is decided here.
+window.addEventListener('pet-dragstart', () => {
+  isDragging = true;
+  pet.classList.add('is-dragging');
+  window.clawd?.play('drag');
+});
 window.addEventListener('pet-dragend', () => {
+  isDragging = false;
+  pet.classList.remove('is-dragging');
+  // Dragging by hand means the release is a real pointerup on the character,
+  // so a click follows it; without this every drop also toggled the panel.
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 80);
   window.clawd?.play(restClip());
   nudge();
 });
@@ -671,13 +684,19 @@ character.addEventListener('pointermove', (e) => {
   const dx = e.clientX - startX, dy = e.clientY - startY;
   if (!justDragged && Math.abs(dx) + Math.abs(dy) > 4) {
     justDragged = true;
+    isDragging = true;
+    pet.classList.add('is-dragging');
     window.clawd?.play('drag');
   }
   pet.style.left = `${baseX + dx}px`;
   pet.style.top = `${baseY + dy}px`;
 });
 character.addEventListener('pointerup', () => {
-  if (justDragged) window.clawd?.idle();
+  if (justDragged) {
+    isDragging = false;
+    pet.classList.remove('is-dragging');
+    window.clawd?.play(restClip());
+  }
   dragging = false;
   setTimeout(() => { justDragged = false; }, 50);
 });

@@ -1,5 +1,5 @@
 // Native bridge: only active inside the Tauri shell.
-// - OS-level window dragging instead of moving a DOM node
+// - drags the window by hand rather than through the OS move loop
 // - keyboard repositioning, so dragging is never the only way to move the pet
 // - resizes the transparent window to tightly fit the pet, anchored
 //   bottom-left, so the panel grows upward and the empty window never blocks
@@ -83,51 +83,77 @@ if (T) {
   window.addEventListener('DOMContentLoaded', () => {
     const ch = document.getElementById('character');
     if (ch) {
-      // Threshold drag: a real move starts OS window dragging, while a plain
-      // press stays a click so the character can still toggle the panel.
-      let down = false, sx = 0, sy = 0, started = false, endTimer = 0;
+      // Dragging is done by hand rather than with Tauri's startDragging().
+      // Handing the window to the OS puts Windows into its modal move loop,
+      // and that loop does two visible things to a transparent window: it
+      // paints its own rectangle around the whole frame, and it stops
+      // compositing the character's 3D layer, so the pet vanished and left an
+      // empty outlined box behind. The move loop also swallows every pointer
+      // event, which meant the swing animation had nothing to run on.
+      //
+      // Moving the window ourselves keeps the pointer, so the animation runs,
+      // the drag ends exactly when the button comes up, and no frame is drawn.
+      let down = false, started = false;
+      let startScreenX = 0, startScreenY = 0;
+      let startWinX = 0, startWinY = 0, scale = 1;
+      let target = null, raf = 0;
 
-      // Once startDragging() hands the pointer to the OS the webview stops
-      // receiving pointer events, so the end of a drag is inferred from the
-      // window's own move events going quiet.
+      function flush() {
+        raf = 0;
+        if (!target) return;
+        const { x, y } = target;
+        target = null;
+        win.setPosition(new PhysicalPosition(x, y)).catch(() => {});
+      }
+
       function endDrag() {
-        clearTimeout(endTimer);
-        const wasDragging = started;
         down = false;
+        if (!started) return;
         started = false;
-        if (wasDragging) {
-          repin();
-          window.dispatchEvent(new Event('pet-dragend'));
-        }
-      }
-      function keepDragging() {
-        clearTimeout(endTimer);
-        // Generous: holding the pet still mid-drag must not look like a drop.
-        // The real end signal is the mouseup below; this is only a safety net.
-        endTimer = setTimeout(endDrag, 1500);
+        if (raf) { cancelAnimationFrame(raf); flush(); }
+        repin();
+        window.dispatchEvent(new Event('pet-dragend'));
       }
 
-      ch.addEventListener('pointerdown', (e) => {
+      ch.addEventListener('pointerdown', async (e) => {
         if (e.button !== 0) return;
-        down = true; started = false; sx = e.clientX; sy = e.clientY;
-      });
-      ch.addEventListener('pointermove', (e) => {
-        if (!down || started) return;
-        if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 5) {
-          started = true;
-          window.clawd?.play('drag');
-          keepDragging();
-          win.startDragging();
+        down = true;
+        started = false;
+        startScreenX = e.screenX;
+        startScreenY = e.screenY;
+        try {
+          scale = await win.scaleFactor();
+          const pos = await win.outerPosition();
+          startWinX = pos.x;
+          startWinY = pos.y;
+        } catch {
+          down = false;
         }
       });
-      ch.addEventListener('pointerup', () => { if (!started) down = false; else endDrag(); });
-      // startDragging() hands the pointer to the OS, so the release usually
-      // comes back here on the window rather than on the character.
-      window.addEventListener('mouseup', () => { if (started) endDrag(); });
-      window.addEventListener('pointerup', () => { if (started) endDrag(); });
-      window.addEventListener('blur', () => { if (started) endDrag(); });
-      // fit() repositions the window too, hence the `started` guard.
-      win.onMoved(() => { if (started) keepDragging(); }).catch(() => {});
+
+      ch.addEventListener('pointermove', (e) => {
+        if (!down) return;
+        // screen coordinates, not client: the window moves out from under the
+        // pointer, so client deltas collapse to zero as soon as it catches up.
+        const dx = e.screenX - startScreenX;
+        const dy = e.screenY - startScreenY;
+        if (!started) {
+          if (Math.abs(dx) + Math.abs(dy) <= 4) return;
+          started = true;
+          ch.setPointerCapture(e.pointerId);
+          window.dispatchEvent(new Event('pet-dragstart'));
+        }
+        target = {
+          x: Math.round(startWinX + dx * scale),
+          y: Math.round(startWinY + dy * scale),
+        };
+        // One move per frame; a setPosition per pointermove floods the IPC.
+        if (!raf) raf = requestAnimationFrame(flush);
+      });
+
+      ch.addEventListener('pointerup', endDrag);
+      ch.addEventListener('pointercancel', endDrag);
+      ch.addEventListener('lostpointercapture', endDrag);
     }
 
     // Re-fit whenever the pet's size changes (panel opening or closing).

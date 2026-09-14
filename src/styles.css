@@ -139,6 +139,14 @@ body.tauri .pet {
 .menu__item:hover { background: rgba(217, 119, 87, 0.22); }
 .menu__item:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 
+/* Handing the pointer to the OS makes Chromium treat the button as
+   keyboard-focused, so a big focus ring framed the character's transparent
+   box for the whole drag. Nobody is navigating by keyboard mid-drag. */
+.pet.is-dragging .character:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* ---------- Dialog ---------- */
 /* Fixed width on purpose: the native window sizes itself to this panel, so a
    viewport-relative width would feed back into its own input and collapse. */
