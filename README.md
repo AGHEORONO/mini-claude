@@ -69,6 +69,28 @@ when a session starts writing and picks one of five working animations.
 
 <br clear="right">
 
+### Other AI CLIs, and skins
+
+Right-click → **Pets & skins…** to choose which tools get a pet. Each ticked
+tool opens its own little window, lined up along the bottom of the screen, and
+each one is its own little creature: a cloud with a `_` mouth for Codex, the
+sparkle for Gemini, a capybara in a T-shirt for Qwen, a block bot for opencode,
+and a pilot in goggles for Copilot. Every character borrows its poses from
+Clawd's frames, so all the moods and work animations work for all of them, and
+each has several skins to choose from.
+
+| Tool | Bars | Where the numbers come from |
+|---|---|---|
+| **Claude Code** | 5h, weekly, weekly Opus | Anthropic rate-limit headers (see below) |
+| **Codex** | 5h / weekly / monthly, whichever your plan has | the rate-limit snapshot Codex writes into `~/.codex/sessions` on every turn |
+| **Gemini CLI** | requests today | counted from `~/.gemini/tmp/*/chats`, against the free-tier cap in config |
+| **Qwen Code** | requests today | same, from `~/.qwen/tmp` |
+| **opencode** | none (it bills your own keys) | token totals from `~/.local/share/opencode/opencode.db` |
+| **Copilot CLI** | premium, chat, completions | GitHub's quota endpoint, using the token from `gh auth token` |
+
+Every pet reacts to its own tool: it starts working when that tool writes to
+its logs. Copilot keeps no local token log, so its panel has no token row.
+
 ### The rest of it
 
 - **Drag him anywhere**, or move him with the arrow keys when he has focus.
@@ -185,6 +207,7 @@ override at **`~/.mini-claude/config.json`** — it is merged over the defaults:
 | `dangerPct` | `90` | panel force-opens, he starts looking tired |
 | `exhaustedPct` | `99` | out of tokens, he cries |
 | `pollSeconds` | `300` | refresh interval (browser fallback only; the native build is event-driven) |
+| `dailyRequests` | `gemini: 1000, qwen: 2000` | free-tier daily request caps for the Gemini and Qwen bars |
 | `limits` | — | weighted-unit limits for the **fallback** estimate, when the API is unreachable |
 | `weights` | — | how token kinds are weighted in that estimate |
 

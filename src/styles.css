@@ -6,10 +6,9 @@
   --ink-soft: #595954;
   --danger: #a93226;
 
-  --bar-5h: #d97757;
-  --bar-week: #a86a3e;
-  --bar-opus: #8c6bd9;
   --bar-track: rgba(61, 61, 58, 0.3);
+  /* Set per provider from providers.js; Claude's is the default. */
+  --accent: var(--terracotta-deep);
 
   --pet-w: 96px;
   --pet-h: 96px;
@@ -186,7 +185,7 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--terracotta-deep);
+  color: var(--accent);
 }
 
 /* 26px minimum keeps every control above the 24x24 target floor. */
@@ -205,10 +204,11 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
   border: 2px solid var(--ink);
   background: var(--cream);
 }
+.dialog__btn[hidden] { display: none; }
 .dialog__btn:hover { background: rgba(217, 119, 87, 0.2); }
 .dialog__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .dialog__btn[aria-pressed="true"] {
-  background: var(--terracotta-deep);
+  background: var(--accent);
   color: #fff;
   /* The emoji glyphs keep their own colour, so pressed also needs a shape cue. */
   box-shadow: inset 0 0 0 2px var(--cream);
@@ -248,6 +248,9 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
   position: relative;
   height: 100%;
   width: 0%;
+  /* An ink edge where the fill stops: most fill colours are close to the
+     track in lightness, and this is what carries the 3:1 contrast. */
+  box-shadow: inset -2px 0 0 var(--ink);
   /* chunky, stepped growth instead of a smooth slide */
   transition: width 0.25s steps(10, end);
 }
@@ -267,6 +270,15 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
     135deg, rgba(255, 255, 255, 0.55) 0 3px, transparent 3px 7px);
 }
 
+/* Shown instead of bars when a provider has none to show. */
+.bars__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.bars__note[hidden] { display: none; }
+
 /* Token counter. A button because it toggles month / all time, but it has to
    sit flush with the bars above it rather than look like a control. */
 .stat {
@@ -282,6 +294,7 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
   border: 2px solid var(--ink);
   background: rgba(61, 61, 58, 0.06);
 }
+.stat[hidden] { display: none; }
 .stat:hover { background: rgba(217, 119, 87, 0.16); }
 .stat:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .stat__top {
@@ -317,6 +330,84 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
 }
 .bars { user-select: text; -webkit-user-select: text; }
 
+/* ---------- Pets & skins ---------- */
+.settings__hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.settings__list { display: flex; flex-direction: column; gap: 6px; }
+
+/* One card per tool, with a stripe in that tool's colour down the left. */
+.prov {
+  border: 2px solid var(--ink);
+  border-left: 6px solid var(--prov-accent, var(--ink));
+  padding: 3px 6px 6px;
+  background: rgba(61, 61, 58, 0.04);
+}
+.prov__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.prov__check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--prov-accent, var(--ink));
+  cursor: pointer;
+}
+.prov__check:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.prov__name { font-weight: 700; margin-right: auto; }
+.prov__status { font-size: 11px; color: #1e6b3c; }
+.prov__status.is-missing { color: var(--ink-soft); }
+
+.prov__skins {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+.swatch { position: relative; display: block; cursor: pointer; }
+/* The radio stays in the accessibility tree and takes focus; the chip is
+   what is seen. */
+.swatch__input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.swatch__chip {
+  display: block;
+  width: 33px;
+  height: 30px;
+  image-rendering: pixelated;
+  border: 2px solid transparent;
+  background: rgba(61, 61, 58, 0.1);
+}
+.swatch:hover .swatch__chip { background: rgba(217, 119, 87, 0.22); }
+/* Selected is a thick ink frame plus a cream inner ring: shape, not colour. */
+.swatch__input:checked + .swatch__chip {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--cream);
+  background: rgba(61, 61, 58, 0.16);
+}
+.swatch__input:focus-visible + .swatch__chip { outline: 2px solid var(--ink); outline-offset: 2px; }
+.prov__skin-name {
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 /* ---------- Motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .dialog { animation: none; }
@@ -344,5 +435,11 @@ body:not(.tauri) .dialog { width: min(252px, calc(100vw - 12px)); }
   .bar__fill { background: Highlight !important; }
   .bar__fill::after { background-image: none; }
   .activity-dot { border-color: CanvasText; }
+  .prov { border-color: CanvasText; }
+  /* Selected must differ in shape, not just in system colour. */
+  .swatch__chip { border-color: Canvas; }
+  .swatch__input:checked + .swatch__chip { border: 4px double Highlight; box-shadow: none; }
+  .swatch__input:focus-visible + .swatch__chip,
+  .prov__check:focus-visible { outline: 3px solid Highlight; }
   .activity-dot.is-active { background: Highlight; }
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mini Claude</title>
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <!-- Single persistent status region. It must exist at load, stay empty and
@@ -34,7 +34,20 @@
       <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="sit">Sit</button>
       <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="usage">Show usage</button>
       <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="motion">Pause motion</button>
+      <button class="menu__item" type="button" role="menuitem" tabindex="-1" data-action="settings">Pets &amp; skins…</button>
     </div>
+
+    <!-- Which pets are on the desktop, and what each one wears. Shared by all
+         pet windows; a change in any of them reaches the others. -->
+    <section id="settings" class="dialog settings" aria-labelledby="settingsTitle" hidden>
+      <header class="dialog__head">
+        <h1 id="settingsTitle" class="dialog__title">Pets &amp; skins</h1>
+        <button id="settingsClose" class="dialog__btn" type="button"
+                aria-label="Close settings"><span aria-hidden="true">✕</span></button>
+      </header>
+      <p id="settingsHint" class="settings__hint">Tick a tool to put its pet on the desktop. Each one opens in its own little window.</p>
+      <div id="settingsList" class="settings__list"></div>
+    </section>
 
     <section id="dialog" class="dialog" aria-labelledby="dialogTitle" hidden>
       <header class="dialog__head">
@@ -52,6 +65,7 @@
       </header>
 
       <div id="bars" class="bars"></div>
+      <p id="barsNote" class="bars__note" hidden></p>
 
       <button id="tokens" class="stat" type="button">
         <span class="stat__top">
@@ -74,8 +88,8 @@
   </div>
 
   <script src="frames.js?v=4"></script>
-  <script src="pixel.js?v=4"></script>
-  <script src="native.js?v=4"></script>
-  <script type="module" src="app.js?v=4"></script>
+  <script src="pixel.js?v=5"></script>
+  <script src="native.js?v=5"></script>
+  <script type="module" src="app.js?v=5"></script>
 </body>
 </html>

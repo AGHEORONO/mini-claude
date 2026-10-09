@@ -1,14 +1,20 @@
 // UI layer. Data comes from the Tauri backend when the native shell is
 // running, otherwise from usage.json written by data/estimate.mjs, otherwise
 // from demo values so the panel is never empty.
+//
+// One window is one pet watching one provider. The main window shows the first
+// pet in the settings and opens a `pet-<id>` window for each of the others.
+
+import { PROVIDERS, byId, skinOf, loadSettings, saveSettings } from './providers.js';
 
 const TAURI = !!globalThis.__TAURI__;
 
-const BAR_DEFS = [
-  { id: '5h',   label: '5h Session',  color: 'var(--bar-5h)' },
-  { id: 'week', label: 'Weekly',      color: 'var(--bar-week)' },
-  { id: 'opus', label: 'Weekly Opus', color: 'var(--bar-opus)' },
-];
+const params = new URLSearchParams(location.search);
+let settings = loadSettings();
+// Extra windows are told who they are; the main one follows the settings.
+const IS_MAIN = !params.has('p');
+const PROV = byId(params.get('p') || settings.pets[0]);
+const PROVIDER = PROV.id;
 
 // Picked at random whenever Claude Code starts writing, so a long session does
 // not look like the same loop over and over.
@@ -35,14 +41,14 @@ function pctOf(used, limit) {
 }
 
 function normalize(raw) {
-  const byId = Object.fromEntries((raw.limits || []).map(l => [l.id, l]));
-  const limits = BAR_DEFS.map(def => {
-    const l = byId[def.id] || {};
+  // The backend names its own bars: how many there are, and what they mean,
+  // differs from one provider to the next.
+  const limits = (raw.limits || []).map((l, i) => {
     const pct = l.pct != null ? l.pct : pctOf(l.used, l.limit);
     return {
-      id: def.id,
-      label: def.label,
-      color: def.color,
+      id: l.id,
+      label: l.label || l.id,
+      color: PROV.bars[i % PROV.bars.length],
       pct,
       resetsAt: l.resetsAt ?? null,
       available: pct != null,
@@ -58,19 +64,24 @@ function normalize(raw) {
 
 function demoData() {
   const now = Date.now();
-  return normalize({
-    source: 'demo', updatedAt: now,
-    limits: [
-      { id: '5h',   used: 64, limit: 100, resetsAt: now + 2.5 * 3600e3 },
-      { id: 'week', used: 41, limit: 100, resetsAt: now + 4 * 86400e3 },
-      { id: 'opus', used: 78, limit: 100, resetsAt: now + 4 * 86400e3 },
-    ],
-  });
+  const limits = PROVIDER === 'claude'
+    ? [
+      { id: '5h',   label: '5h Session',  used: 64, limit: 100, resetsAt: now + 2.5 * 3600e3 },
+      { id: 'week', label: 'Weekly',      used: 41, limit: 100, resetsAt: now + 4 * 86400e3 },
+      { id: 'opus', label: 'Weekly Opus', used: 78, limit: 100, resetsAt: now + 4 * 86400e3 },
+    ]
+    : [
+      { id: 'a', label: '5h Session', used: 37, limit: 100, resetsAt: now + 3 * 3600e3 },
+      { id: 'b', label: 'Weekly',     used: 22, limit: 100, resetsAt: now + 5 * 86400e3 },
+    ];
+  return normalize({ source: 'demo', updatedAt: now, limits });
 }
 
 async function getUsage() {
-  const native = await invoke('get_usage');
+  const native = await invoke('get_usage', { provider: PROVIDER });
   if (native?.limits) return normalize(native);
+  // usage.json only ever describes Claude.
+  if (PROVIDER !== 'claude') return demoData();
   try {
     const res = await fetch('./usage.json', { cache: 'no-store' });
     if (res.ok) return normalize(await res.json());
@@ -108,6 +119,12 @@ const pet          = document.getElementById('pet');
 const character    = document.getElementById('character');
 const dialog       = document.getElementById('dialog');
 const barsEl       = document.getElementById('bars');
+const barsNote     = document.getElementById('barsNote');
+const dialogTitle  = document.getElementById('dialogTitle');
+const settingsEl   = document.getElementById('settings');
+const settingsList = document.getElementById('settingsList');
+const settingsHint = document.getElementById('settingsHint');
+const settingsClose = document.getElementById('settingsClose');
 const sourceEl     = document.getElementById('source');
 const liveEl       = document.getElementById('liveStatus');
 const activityDot  = document.getElementById('activityDot');
@@ -147,6 +164,8 @@ function compact(n) {
 const exact = (n) => (n == null ? 'unknown' : n.toLocaleString('en-GB'));
 
 function renderTokens() {
+  // Copilot keeps no local token log, so the row would only ever be empty.
+  tokensBtn.hidden = TAURI && totals === null;
   const month = tokensMode === 'month';
   const sum = totals && (month ? totals.month : totals.allTime);
   const period = month ? 'this month' : 'all time';
@@ -165,7 +184,7 @@ function renderTokens() {
 }
 
 async function loadTotals() {
-  totals = await invoke('get_totals');
+  totals = await invoke('get_totals', { provider: PROVIDER });
   renderTokens();
 }
 
@@ -187,6 +206,9 @@ let sleepTimer = null;
 // Told to sit via the right-click menu. Sitting outranks everything except
 // being picked up: he was asked to stay put, so he stays put.
 let sitting = false;
+// Per pet: telling one to sit should not sit them all. Claude keeps the key
+// it always had, so an existing install remembers.
+const SIT_KEY = PROVIDER === 'claude' ? 'miniClaude.sit' : `miniClaude.sit.${PROVIDER}`;
 let cryTimer = null;
 // Out of tokens. Unlike the sulk, this one is a fact about the world: no
 // amount of petting makes it stop, only the limit resetting does.
@@ -224,17 +246,17 @@ function armCry() {
 
 function setSitting(on) {
   sitting = on;
-  try { localStorage.setItem('miniClaude.sit', on ? '1' : '0'); } catch { /* private mode */ }
+  try { localStorage.setItem(SIT_KEY, on ? '1' : '0'); } catch { /* private mode */ }
   clearTimeout(cryTimer);
   clearTimeout(sleepTimer);
   if (on) {
     window.clawd?.play('sit');
     armCry();
-    announce('Mini Claude is sitting.');
+    announce(`Mini ${PROV.name} is sitting.`);
   } else {
     window.clawd?.play('happy', 'idle');
     armSleep();
-    announce('Mini Claude is up again.');
+    announce(`Mini ${PROV.name} is up again.`);
   }
 }
 
@@ -255,6 +277,7 @@ function nudge() {
 
 // ── Announcements ───────────────────────────────────────────────────────────
 function announce(msg) {
+  liveMsg = msg;
   clearTimeout(liveClearTimer);
   // Blanking first guarantees an identical later message is still spoken.
   liveEl.textContent = '';
@@ -287,6 +310,7 @@ function announceDanger(data) {
 // ── Panel ───────────────────────────────────────────────────────────────────
 function setDialogOpen(open) {
   if (dialog.hidden === !open) return;
+  if (open) closeSettings({ refocus: false });
   // Must be read before hiding, or activeElement has already moved to body.
   const hadFocusInside = dialog.contains(document.activeElement);
   dialog.hidden = !open;
@@ -303,9 +327,14 @@ function dismiss() {
 }
 
 // ── Bars ────────────────────────────────────────────────────────────────────
-function buildBars() {
-  if (barsEl.children.length) return;
-  for (const def of BAR_DEFS) {
+// Rebuilt only when the set of bars changes (Codex, say, gains its weekly
+// window when the plan changes); otherwise the rows are updated in place.
+function buildBars(defs) {
+  const ids = defs.map((d) => d.id).join('|');
+  if (barsEl.dataset.ids === ids) return;
+  barsEl.dataset.ids = ids;
+  barsEl.textContent = '';
+  for (const def of defs) {
     const row = document.createElement('div');
     row.className = 'bar';
     row.dataset.id = def.id;
@@ -344,7 +373,17 @@ function buildBars() {
   }
 }
 
+// Said instead of an empty panel when a provider has nothing to put in bars.
+const NO_BARS = {
+  codex: 'No Codex sessions found yet. Run codex once and its limits show up here.',
+  copilot: 'No quota data. Sign in with “gh auth login” to see your Copilot limits.',
+  opencode: 'No plan limits: opencode bills the API keys you give it.',
+};
+
 function renderData(data) {
+  buildBars(data.limits);
+  barsNote.hidden = data.limits.length > 0;
+  barsNote.textContent = NO_BARS[PROVIDER] || 'No usage data yet.';
   for (const l of data.limits) {
     const row = barsEl.querySelector(`.bar[data-id="${l.id}"]`);
     if (!row) continue;
@@ -374,7 +413,9 @@ function renderData(data) {
       row.classList.remove('is-danger');
     }
   }
-  const srcLabel = { real: 'real data', estimate: 'estimated', demo: 'demo' }[data.source] || data.source;
+  const srcLabel = {
+    real: 'real data', logs: `from ${PROV.cli} logs`, estimate: 'estimated', demo: 'demo', none: 'no data',
+  }[data.source] || data.source;
   const time = new Date(data.updatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   sourceEl.dataset.text = `${srcLabel} · ${time}`;
   if (!sourceEl.dataset.tipShown) sourceEl.textContent = sourceEl.dataset.text;
@@ -432,22 +473,26 @@ function schedulePoll() {
 // used to cost a `tasklist` spawn every 15s for strictly less information.
 function setActivity(active) {
   activityDot.classList.toggle('is-active', active);
-  activityText.textContent = active ? 'Claude Code working' : 'Claude Code idle';
+  activityText.textContent = `${PROV.cli} ${active ? 'working' : 'idle'}`;
 }
 
 async function listenNative() {
   if (!TAURI) { activityDot.hidden = true; activityText.hidden = true; return; }
   const { listen } = globalThis.__TAURI__.event;
   try {
-    await listen('usage-updated', async () => {
+    await listen('usage-updated', async (e) => {
+      const who = e.payload?.provider;
+      if (who && who !== PROVIDER) return;
       applyData(await getUsage());
       loadTotals();
     });
-    await listen('claude-working', (e) => {
+    await listen('settings-changed', () => onSettingsChanged());
+    await listen('agent-working', (e) => {
+      if (e.payload?.provider !== PROVIDER) return;
       const active = !!e.payload?.active;
       setActivity(active);
       if (active) {
-        // Deliberately not nudge(): Claude Code running is not the user
+        // Deliberately not nudge(): the agent running is not the user
         // paying attention to the pet, so it must not reset the cry timer.
         if (!isWorking && !sitting && !exhausted && !isDragging) {
           isWorking = true;
@@ -563,6 +608,7 @@ character.addEventListener('mouseenter', () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !menuEl.hidden) { e.preventDefault(); closeMenu(); return; }
+  if (e.key === 'Escape' && !settingsEl.hidden) { e.preventDefault(); closeSettings(); return; }
   if (e.key !== 'Escape' || e.defaultPrevented || dialog.hidden) return;
   const a = document.activeElement;
   if (!dialog.contains(a) && a !== character && a !== document.body) return;
@@ -581,6 +627,7 @@ function labelMenu() {
       sit: sitting ? 'Stand up' : 'Sit',
       usage: dialog.hidden ? 'Show usage' : 'Hide usage',
       motion: window.clawd?.isPaused() ? 'Resume motion' : 'Pause motion',
+      settings: settingsEl.hidden ? 'Pets & skins…' : 'Hide pets & skins',
     }[item.dataset.action];
     if (text) item.textContent = text;
   }
@@ -604,6 +651,10 @@ function runMenu(action) {
   if (action === 'sit') setSitting(!sitting);
   else if (action === 'usage') { if (dialog.hidden) refresh({ show: true }); else dismiss(); }
   else if (action === 'motion') motionBtn.click();
+  else if (action === 'settings') {
+    if (settingsEl.hidden) { closeMenu({ refocus: false }); openSettings(); return; }
+    closeSettings({ refocus: false });
+  }
   closeMenu();
 }
 
@@ -647,6 +698,214 @@ document.addEventListener('pointerdown', (e) => {
     closeMenu({ refocus: false });
   }
 });
+
+// ── Theme ───────────────────────────────────────────────────────────────────
+function applyTheme() {
+  window.clawd?.setSkin(skinOf(PROV, settings.skins[PROVIDER]), PROV.sprite);
+  document.documentElement.style.setProperty('--accent', PROV.accent);
+  document.documentElement.dataset.provider = PROVIDER;
+  document.title = `Mini ${PROV.name}`;
+  dialogTitle.textContent = `${PROV.name} usage`;
+  character.setAttribute('aria-label', `Mini ${PROV.name}, ${PROV.name} usage`);
+}
+
+// ── Pets & skins ────────────────────────────────────────────────────────────
+// Native checkboxes and radios underneath, so the keyboard and screen reader
+// contract comes for free: Tab between groups, arrows within a skin group.
+let found = null;
+
+function buildSettings() {
+  settingsList.textContent = '';
+  for (const p of PROVIDERS) {
+    const row = document.createElement('div');
+    row.className = 'prov';
+    row.style.setProperty('--prov-accent', p.accent);
+
+    const head = document.createElement('label');
+    head.className = 'prov__head';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'prov__check';
+    box.dataset.pet = p.id;
+    const name = document.createElement('span');
+    name.className = 'prov__name';
+    name.textContent = p.cli;
+    const status = document.createElement('span');
+    status.className = 'prov__status';
+    status.dataset.status = p.id;
+    head.append(box, name, status);
+
+    const group = document.createElement('fieldset');
+    group.className = 'prov__skins';
+    const legend = document.createElement('legend');
+    legend.className = 'sr-only';
+    legend.textContent = `${p.cli} skin`;
+    group.append(legend);
+    for (const sk of p.skins) {
+      const swatch = document.createElement('label');
+      swatch.className = 'swatch';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.className = 'swatch__input';
+      radio.name = `skin-${p.id}`;
+      radio.value = sk.id;
+      radio.dataset.prov = p.id;
+      const chip = document.createElement('canvas');
+      chip.className = 'swatch__chip';
+      chip.width = 22;
+      chip.height = 20;
+      chip.setAttribute('aria-hidden', 'true');
+      window.clawd?.preview(chip, sk, p.sprite);
+      const text = document.createElement('span');
+      text.className = 'sr-only';
+      text.textContent = sk.name;
+      swatch.append(radio, chip, text);
+      group.append(swatch);
+    }
+    const current = document.createElement('span');
+    current.className = 'prov__skin-name';
+    current.setAttribute('aria-hidden', 'true');
+    current.dataset.skinName = p.id;
+    group.append(current);
+
+    row.append(head, group);
+    settingsList.append(row);
+  }
+  syncSettings();
+}
+
+// Reflects the stored settings into the controls, so a change made from
+// another pet's window shows up here too.
+function syncSettings() {
+  for (const box of settingsList.querySelectorAll('.prov__check')) {
+    box.checked = settings.pets.includes(box.dataset.pet);
+  }
+  for (const p of PROVIDERS) {
+    const sk = skinOf(p, settings.skins[p.id]);
+    const radio = settingsList.querySelector(`input[name="skin-${p.id}"][value="${sk.id}"]`);
+    if (radio) radio.checked = true;
+    const label = settingsList.querySelector(`[data-skin-name="${p.id}"]`);
+    if (label) label.textContent = sk.name;
+    const status = settingsList.querySelector(`[data-status="${p.id}"]`);
+    if (status && found) {
+      const f = found.find((x) => x.id === p.id)?.found;
+      status.textContent = f ? 'found' : 'not installed';
+      status.classList.toggle('is-missing', !f);
+    }
+  }
+}
+
+async function openSettings() {
+  if (dialog.hidden === false) dismiss();
+  if (!settingsList.children.length) buildSettings();
+  if (!TAURI) settingsHint.textContent = 'Tick the tool this pet should watch. In the desktop app each ticked tool gets its own pet.';
+  settingsEl.hidden = false;
+  settingsList.querySelector('input')?.focus();
+  if (!found) {
+    found = await invoke('list_providers');
+    syncSettings();
+  }
+}
+
+function closeSettings({ refocus = true } = {}) {
+  if (settingsEl.hidden) return;
+  const hadFocus = settingsEl.contains(document.activeElement);
+  settingsEl.hidden = true;
+  if (refocus && hadFocus) character.focus();
+}
+
+settingsClose.addEventListener('click', () => closeSettings());
+
+settingsList.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.matches('.prov__check')) {
+    const next = PROVIDERS.map((p) => p.id).filter((id) =>
+      id === t.dataset.pet ? t.checked : settings.pets.includes(id));
+    if (!next.length) {
+      // Someone has to stay on the desktop, or there is nowhere to undo it from.
+      t.checked = true;
+      announce('At least one pet has to stay on the desktop.');
+      return;
+    }
+    settings.pets = next;
+    const name = byId(t.dataset.pet).cli;
+    announce(t.checked ? `${name} pet added.` : `${name} pet removed.`);
+  } else if (t.matches('.swatch__input')) {
+    settings.skins = { ...settings.skins, [t.dataset.prov]: t.value };
+  } else {
+    return;
+  }
+  saveSettings(settings);
+  // If this window is about to reload into another pet, carry the panel,
+  // focus and announcement across, or the change happens in silence.
+  if (IS_MAIN && settings.pets[0] !== PROVIDER) {
+    try {
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({
+        focus: t.matches('.prov__check') ? t.dataset.pet : null,
+        msg: liveMsg,
+      }));
+    } catch { /* private mode */ }
+  }
+  onSettingsChanged();
+  if (TAURI) globalThis.__TAURI__.event.emit('settings-changed').catch(() => {});
+});
+
+const RESUME_KEY = 'miniClaude.resumeSettings';
+let liveMsg = '';
+
+function resumeSettings() {
+  let r = null;
+  try {
+    r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null');
+    sessionStorage.removeItem(RESUME_KEY);
+  } catch { /* private mode */ }
+  if (!r) return;
+  openSettings();
+  if (r.focus) settingsList.querySelector(`.prov__check[data-pet="${r.focus}"]`)?.focus();
+  if (r.msg) announce(r.msg);
+}
+
+function onSettingsChanged() {
+  settings = loadSettings();
+  applyTheme();
+  if (settingsList.children.length) syncSettings();
+  if (IS_MAIN) reconcileWindows();
+}
+
+// Main window only: one extra window per extra pet, closed again when the pet
+// is unticked. If its own pet is unticked the main window simply becomes the
+// next one in the list.
+let reconciling = false;
+async function reconcileWindows() {
+  if (settings.pets[0] !== PROVIDER) { location.reload(); return; }
+  if (!TAURI || reconciling) return;
+  reconciling = true;
+  try {
+    const { WebviewWindow } = globalThis.__TAURI__.webviewWindow;
+    const extra = settings.pets.slice(1);
+    for (const [i, id] of extra.entries()) {
+      const label = `pet-${id}`;
+      if (await WebviewWindow.getByLabel(label)) continue;
+      const w = new WebviewWindow(label, {
+        url: `index.html?p=${id}&slot=${i + 1}`,
+        title: `Mini ${byId(id).name}`,
+        width: 320, height: 600,
+        resizable: false, decorations: false, transparent: true,
+        alwaysOnTop: true, shadow: false, skipTaskbar: true,
+      });
+      w.once('tauri://error', (e) => console.warn('pet window failed', id, e));
+    }
+    for (const p of PROVIDERS) {
+      if (extra.includes(p.id)) continue;
+      const w = await WebviewWindow.getByLabel(`pet-${p.id}`);
+      if (w) await w.destroy();
+    }
+  } catch (e) {
+    console.warn('reconcile failed', e);
+  } finally {
+    reconciling = false;
+  }
+}
 
 // ── Moving the pet ──────────────────────────────────────────────────────────
 // Dragging must not be the only way to reposition an always-on-top window.
@@ -702,11 +961,11 @@ character.addEventListener('pointerup', () => {
 });
 
 // ── Boot ────────────────────────────────────────────────────────────────────
-buildBars();
+applyTheme();
 renderTokens();
 wireTips();
 try {
-  if (localStorage.getItem('miniClaude.sit') === '1') {
+  if (localStorage.getItem(SIT_KEY) === '1') {
     sitting = true;
     window.clawd?.play('sit');
     armCry();
@@ -719,3 +978,5 @@ await loadConfig();
 await refresh();
 listenNative();
 initAutostart();
+if (IS_MAIN) reconcileWindows();
+resumeSettings();

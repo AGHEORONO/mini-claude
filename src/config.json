@@ -13,5 +13,9 @@
   },
   "pollSeconds": 300,
   "dangerPct": 90,
-  "exhaustedPct": 99
+  "exhaustedPct": 99,
+  "dailyRequests": {
+    "gemini": 1000,
+    "qwen": 2000
+  }
 }

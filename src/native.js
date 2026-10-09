@@ -13,6 +13,8 @@ if (T) {
 
   const { getCurrentWindow, PhysicalSize, PhysicalPosition } = T.window;
   const win = getCurrentWindow();
+  // Extra pets line up to the right of the main one instead of on top of it.
+  const slot = Number(new URLSearchParams(location.search).get('slot')) || 0;
 
   // Fit the window to the visible pet, keeping the bottom-left corner fixed.
   // The very first fit also parks it in the corner of the work area: left to
@@ -43,7 +45,7 @@ if (T) {
         // First fit parks him in the corner of the work area: screen.avail*
         // already excludes the taskbar, and is in CSS pixels.
         anchorBottom = Math.round(window.screen.availHeight * scale) - Math.round(8 * scale);
-        newX = Math.round(16 * scale);
+        newX = Math.round((16 + slot * 140) * scale);
       }
       await win.setSize(new PhysicalSize(newW, newH));
       await win.setPosition(new PhysicalPosition(newX, anchorBottom - newH));

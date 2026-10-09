@@ -35,6 +35,171 @@
   };
   const SHADOW = 'rgba(40, 25, 15, 0.9)';
 
+  // ── Skins ─────────────────────────────────────────────────────────────────
+  // A skin never redraws the art. It recolours the same frames, so every clip
+  // works for every character. Besides the three base tones a skin may add
+  // one treatment, each worked out per frame relative to the body, so it
+  // follows him through the jumps and the drag:
+  //   grad    -- body colour runs top to bottom through a list of tones
+  //   scan    -- every other body row a touch lighter (a CRT look)
+  //   band    -- the eye row between the eyes becomes a visor/goggle strap
+  //   outline -- body pixels on the silhouette edge get an ink line
+  const CLASSIC = { id: 'classic', body: COLORS.o, shade: COLORS.d, eye: COLORS.e };
+  let skin = CLASSIC;
+  const painted = new Map();
+
+  const isBody = (ch) => ch === 'o' || ch === 'd';
+
+  // ── Characters ────────────────────────────────────────────────────────────
+  // Other characters have one hand-drawn resting sprite and borrow every pose
+  // from the matching Clawd frame: how far the body has moved, whether the
+  // eyes are open, closed, glancing or drooping, whether the legs are tucked
+  // under, plus the props (tears, laptop, papers) and the ground shadow. That
+  // keeps every clip working for every character without ~100 frames each.
+  let sprite = null;
+  const composed = new Map();
+
+  function bodyTop(rows) {
+    for (let y = 0; y < ROWS; y++) if ([...(rows[y] || '')].some(isBody)) return y;
+    return 0;
+  }
+
+  // Eyes that sit in a face, as opposed to the stray sleep mark in tired_1.
+  function eyesOf(rows) {
+    const out = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if ((rows[y] || '')[x] !== 'e') continue;
+        const near = [-1, 1].some((d) => isBody((rows[y] || '')[x + d]) || isBody((rows[y + d] || '')[x]));
+        if (near) out.push([x, y]);
+      }
+    }
+    return out;
+  }
+
+  const CLAWD_BASE = F.idle_1 || [];
+  const BASE_TOP = bodyTop(CLAWD_BASE);
+  const BASE_EYES = eyesOf(CLAWD_BASE);
+  const mean = (a, k) => a.reduce((s, v) => s + v[k], 0) / a.length;
+
+  function compose(name, spr) {
+    const src = F[name];
+    if (!src) return null;
+    const grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(' '));
+    const set = (x, y, ch) => { if (y >= 0 && y < ROWS && x >= 0 && x < COLS) grid[y][x] = ch; };
+
+    // Legs tucked away: the row under the body is empty where idle has feet.
+    const top = bodyTop(src);
+    const sit = !/[od]/.test(src[8] || '') && /[od]/.test(src[7] || '') && top >= BASE_TOP;
+    const dy = top - BASE_TOP + (sit ? 1 : 0);
+    const rows = spr.rows;
+    const last = sit ? rows.length - 2 : rows.length - 1;
+    for (let y = 0; y <= last; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const ch = (rows[y] || '')[x];
+        if (ch && ch !== ' ') set(x, y + dy, ch);
+      }
+    }
+
+    // Eyes: closed when Clawd's are, otherwise nudged the way his moved.
+    const eyes = eyesOf(src);
+    const own = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (grid[y][x] === 'e') own.push([x, y]);
+    if (!eyes.length) {
+      for (const [x, y] of own) grid[y][x] = 'c';
+    } else if (BASE_EYES.length) {
+      const ex = Math.max(-1, Math.min(1, Math.round(mean(eyes, 0) - mean(BASE_EYES, 0))));
+      const ey = Math.max(0, Math.min(1, Math.round(mean(eyes, 1) - top - (mean(BASE_EYES, 1) - BASE_TOP))));
+      if (ex || ey) {
+        // Only within the eye socket: the body, or a lens or screen.
+        const socket = spr.socket || 'od';
+        const fits = own.every(([x, y]) => socket.includes((grid[y + ey] || [])[x + ex] || ' '));
+        if (fits) {
+          const under = own.map(([x, y]) => grid[y + ey][x + ex]);
+          // Whatever the eye moved off is filled with what it moved onto.
+          own.forEach(([x, y], i) => { grid[y][x] = under[i]; });
+          for (const [x, y] of own) grid[y + ey][x + ex] = 'e';
+        }
+      }
+    }
+
+    // Props and the stray sleep mark are copied as they are; the shadow row
+    // follows Clawd's, since it already tracks the height of the jump.
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const ch = (src[y] || '')[x];
+        if (y === ROWS - 1) { grid[y][x] = ch === 'x' ? 'x' : (grid[y][x] === 'x' ? ' ' : grid[y][x]); continue; }
+        if ('tkgGp'.includes(ch)) set(x, y, ch);
+        else if (ch === 'e' && !eyes.some(([ex, ey]) => ex === x && ey === y)) set(x, y, 'e');
+      }
+    }
+    return grid.map((r) => r.join(''));
+  }
+
+  function rowsFor(name) {
+    if (!sprite) return F[name];
+    let r = composed.get(name);
+    if (r === undefined) { r = compose(name, sprite); composed.set(name, r); }
+    return r;
+  }
+
+  function paint(rows, sk) {
+    const out = new Array(COLS * ROWS).fill(null);
+    const at = (x, y) => (y >= 0 && y < ROWS && x >= 0 && x < COLS ? (rows[y] || '')[x] || ' ' : ' ');
+    let top = ROWS, bot = -1;
+    for (let y = 0; y < ROWS; y++) {
+      if ([...(rows[y] || '')].some(isBody)) { top = Math.min(top, y); bot = Math.max(bot, y); }
+    }
+    const band = new Set();
+    if (sk.band) {
+      for (let y = 0; y < ROWS; y++) {
+        const row = rows[y] || '';
+        const eyes = [];
+        for (let x = 0; x < COLS; x++) {
+          if (row[x] === 'e' && (isBody(at(x - 1, y)) || isBody(at(x + 1, y)))) eyes.push(x);
+        }
+        if (!eyes.length) continue;
+        for (let x = Math.min(...eyes) - 1; x <= Math.max(...eyes) + 1; x++) {
+          if (isBody(at(x, y))) band.add(y * COLS + x);
+        }
+      }
+    }
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const ch = at(x, y);
+        const i = y * COLS + x;
+        if (!isBody(ch)) {
+          // `c` is a shut eye: a lid line in the skin's own colour.
+          out[i] = ch === 'e' ? sk.eye : ch === 'c' ? (sk.lid || sk.shade) : (sk[ch] || COLORS[ch] || null);
+          continue;
+        }
+        const dark = ch === 'd';
+        let c = dark ? sk.shade : sk.body;
+        if (sk.grad) {
+          const k = bot > top ? (y - top) / (bot - top) : 0;
+          const n = Math.round(k * (sk.grad.length - 1));
+          c = dark ? (sk.gradShade ? sk.gradShade[n] : sk.shade) : sk.grad[n];
+        }
+        if (sk.scan && !dark && (y - top) % 2 === 1) c = sk.scan;
+        if (sk.outline && !dark) {
+          const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+            .some(([dx, dy]) => { const n = at(x + dx, y + dy); return !isBody(n) && n !== 'e'; });
+          if (edge) c = sk.outline;
+        }
+        if (band.has(i)) c = sk.band;
+        out[i] = c;
+      }
+    }
+    return out;
+  }
+
+  function colorsFor(name) {
+    const key = `${skin.id}|${name}`;
+    let c = painted.get(key);
+    if (!c) { c = paint(rowsFor(name), skin); painted.set(key, c); }
+    return c;
+  }
+
   // ── Clips ─────────────────────────────────────────────────────────────────
   // `motion` returns the continuous transform, `t` in seconds since the clip
   // started. Amplitudes stay small on purpose: this is meant to read as the
@@ -288,9 +453,13 @@
     return r;
   }
 
+  let shownFrame = null;
+
   function renderFrame(name) {
-    const rows = F[name];
+    const rows = rowsFor(name);
     if (!rows) return;
+    shownFrame = name;
+    const colors = colorsFor(name);
     for (let y = 0; y < ROWS; y++) {
       const row = rows[y] || '';
       for (let x = 0; x < COLS; x++) {
@@ -303,7 +472,7 @@
           shadowCells[i].style.display = shadow ? '' : 'none';
         }
 
-        const fill = shadow ? null : (COLORS[ch] || null);
+        const fill = shadow ? null : colors[i];
         if (fill === cellFill[i]) continue;
         cellFill[i] = fill;
         if (fill === null) {
@@ -470,5 +639,30 @@
     // looping mascot on an always-on-top window can always be stopped.
     setPaused(on) { paused = !!on; if (paused) freeze(); else play(curAnim); },
     isPaused() { return paused; },
+    // Swap the palette in place; the current frame is repainted at once so a
+    // paused or reduced-motion pet changes colour too.
+    setSkin(sk, spr) {
+      skin = sk && sk.id ? sk : CLASSIC;
+      if ((spr || null) !== sprite) { sprite = spr || null; composed.clear(); }
+      painted.clear();
+      cellFill.fill(null);
+      if (bodySvg && shownFrame) renderFrame(shownFrame);
+    },
+    // Draws the resting pose in a given skin onto a canvas, for the settings
+    // swatches. Shares paint() with the live sprite so the two cannot drift.
+    preview(canvas, sk, spr, frame) {
+      const ctx = canvas.getContext('2d');
+      const name = frame || (F.idle_1 ? 'idle_1' : Object.keys(F)[0]);
+      const colors = paint(spr ? compose(name, spr) : F[name], sk);
+      const px = Math.floor(Math.min(canvas.width / COLS, canvas.height / ROWS));
+      const ox = Math.floor((canvas.width - px * COLS) / 2);
+      const oy = Math.floor((canvas.height - px * ROWS) / 2);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      colors.forEach((c, i) => {
+        if (!c) return;
+        ctx.fillStyle = c;
+        ctx.fillRect(ox + (i % COLS) * px, oy + Math.floor(i / COLS) * px, px, px);
+      });
+    },
   };
 })();

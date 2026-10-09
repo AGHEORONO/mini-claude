@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the Mini Claude pet window",
-  "windows": ["main"],
+  "description": "Capabilities for the pet windows (main, plus one pet-<provider> window per extra pet)",
+  "windows": [
+    "main",
+    "pet-*"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -11,6 +14,9 @@
     "core:window:allow-set-position",
     "core:window:allow-outer-position",
     "core:window:allow-outer-size",
-    "core:window:allow-scale-factor"
+    "core:window:allow-scale-factor",
+    "core:window:allow-destroy",
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-get-all-webviews"
   ]
 }

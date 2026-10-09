@@ -9,6 +9,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
+mod providers;
+
 const HOUR: i64 = 3_600_000;
 const DAY: i64 = 24 * HOUR;
 const WINDOW_5H: i64 = 5 * HOUR;
@@ -50,6 +52,9 @@ struct Config {
     danger_pct: i64,
     #[serde(rename = "exhaustedPct", default = "default_exhausted")]
     exhausted_pct: i64,
+    /// Free-tier request caps for the CLIs that only enforce a daily count.
+    #[serde(rename = "dailyRequests", default)]
+    daily_requests: HashMap<String, i64>,
 }
 
 fn default_poll() -> u64 { 300 }
@@ -95,6 +100,7 @@ fn config() -> &'static Config {
 #[serde(rename_all = "camelCase")]
 struct Bar {
     id: String,
+    label: String,
     used: i64,
     limit: Option<i64>,
     resets_at: Option<i64>,
@@ -105,6 +111,7 @@ struct Bar {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Usage {
+    provider: String,
     source: String,
     updated_at: i64,
     limits: Vec<Bar>,
@@ -151,7 +158,14 @@ struct Totals {
 
 #[derive(Serialize, Clone)]
 struct WorkingPayload {
+    provider: &'static str,
     active: bool,
+}
+
+#[derive(Serialize, Clone)]
+struct UpdatedPayload {
+    /// None means every provider (the periodic heartbeat).
+    provider: Option<&'static str>,
 }
 
 // Raw token counts, not pre-weighted: the scan cache then stays valid
@@ -237,20 +251,31 @@ fn hash_id(s: &str) -> u64 {
 struct FileScan {
     offset: u64,
     events: Vec<LogEvent>,
+    /// The newest provider-specific record seen in this file, with its
+    /// timestamp (Codex writes its rate-limit snapshot this way).
+    latest: Option<(i64, Value)>,
 }
+
+type LineParser = fn(&str, &mut FileScan);
 
 static SCAN_CACHE: Mutex<Option<HashMap<PathBuf, FileScan>>> = Mutex::new(None);
 
-fn collect_jsonl(dir: &Path, out: &mut Vec<(PathBuf, u64)>) {
+fn collect_files(dir: &Path, ext: &str, out: &mut Vec<(PathBuf, u64)>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let p = e.path();
         let Ok(meta) = e.metadata() else { continue };
         if meta.is_dir() {
-            collect_jsonl(&p, out);
-        } else if p.extension().is_some_and(|x| x == "jsonl") {
+            collect_files(&p, ext, out);
+        } else if p.extension().is_some_and(|x| x == ext) {
             out.push((p, meta.len()));
         }
+    }
+}
+
+fn claude_line(line: &str, f: &mut FileScan) {
+    if let Some(ev) = parse_line(line) {
+        f.events.push(ev);
     }
 }
 
@@ -286,7 +311,7 @@ fn parse_line(line: &str) -> Option<LogEvent> {
 }
 
 /// Parse the bytes appended since the last visit to this file.
-fn read_tail(path: &Path, entry: &mut FileScan) {
+fn read_tail(path: &Path, entry: &mut FileScan, parse: LineParser) {
     let Ok(mut f) = File::open(path) else { return };
     if f.seek(SeekFrom::Start(entry.offset)).is_err() {
         return;
@@ -305,9 +330,7 @@ fn read_tail(path: &Path, entry: &mut FileScan) {
                     break;
                 }
                 read += n as u64;
-                if let Some(ev) = parse_line(&line) {
-                    entry.events.push(ev);
-                }
+                parse(&line, entry);
             }
             Err(_) => break,
         }
@@ -315,42 +338,66 @@ fn read_tail(path: &Path, entry: &mut FileScan) {
     entry.offset = read;
 }
 
-/// Every assistant message ever logged, deduplicated.
+/// Every event logged under `root`, deduplicated, plus the newest `latest`
+/// record across all of its files.
 ///
 /// Deduplication is not optional: resuming a session copies its whole history
 /// into the new file, and on a real install that is over half of all the lines.
-fn all_events() -> Vec<LogEvent> {
-    let Some(home) = dirs::home_dir() else { return Vec::new() };
-    let projects = home.join(".claude").join("projects");
-
+/// The cache is keyed by path, so several providers share it without clashing.
+fn scan_jsonl(root: &Path, parse: LineParser) -> (Vec<LogEvent>, Option<(i64, Value)>) {
     let mut files = Vec::new();
-    collect_jsonl(&projects, &mut files);
+    collect_files(root, "jsonl", &mut files);
 
-    let Ok(mut guard) = SCAN_CACHE.lock() else { return Vec::new() };
+    let Ok(mut guard) = SCAN_CACHE.lock() else { return (Vec::new(), None) };
     let cache = guard.get_or_insert_with(HashMap::new);
     let live: HashSet<&PathBuf> = files.iter().map(|(p, _)| p).collect();
-    cache.retain(|p, _| live.contains(p));
+    cache.retain(|p, _| !p.starts_with(root) || live.contains(p));
 
     let mut out = Vec::new();
+    let mut latest: Option<(i64, Value)> = None;
     for (path, len) in &files {
         let entry = cache.entry(path.clone()).or_insert(FileScan {
             offset: 0,
             events: Vec::new(),
+            latest: None,
         });
         // Truncated or rotated, so the cached tail is meaningless.
         if *len < entry.offset {
             entry.offset = 0;
             entry.events.clear();
+            entry.latest = None;
         }
         if *len > entry.offset {
-            read_tail(path, entry);
+            read_tail(path, entry, parse);
         }
         out.extend(entry.events.iter().cloned());
+        if let Some((ts, v)) = &entry.latest {
+            if latest.as_ref().map_or(true, |(t, _)| ts > t) {
+                latest = Some((*ts, v.clone()));
+            }
+        }
     }
 
     let mut seen = HashSet::with_capacity(out.len());
     out.retain(|e| e.id == 0 || seen.insert(e.id));
-    out
+    out.sort_by_key(|e| e.ts);
+    (out, latest)
+}
+
+fn home_path(parts: &[&str]) -> Option<PathBuf> {
+    let mut p = dirs::home_dir()?;
+    for part in parts {
+        p.push(part);
+    }
+    Some(p)
+}
+
+/// Every Claude Code assistant message ever logged, deduplicated.
+fn all_events() -> Vec<LogEvent> {
+    match home_path(&[".claude", "projects"]) {
+        Some(root) => scan_jsonl(&root, claude_line).0,
+        None => Vec::new(),
+    }
 }
 
 fn collect_events(cutoff: i64) -> Vec<LogEvent> {
@@ -385,12 +432,13 @@ fn compute_estimate() -> Usage {
     let (uw, rw) = bucket(&events, WINDOW_WEEK, false);
     let (uo, ro) = bucket(&events, WINDOW_WEEK, true);
     Usage {
+        provider: "claude".into(),
         source: "estimate".into(),
         updated_at: now_ms(),
         limits: vec![
-            Bar { id: "5h".into(), used: u5, limit: cfg.limits.five, resets_at: r5, pct: None },
-            Bar { id: "week".into(), used: uw, limit: cfg.limits.week, resets_at: rw, pct: None },
-            Bar { id: "opus".into(), used: uo, limit: cfg.limits.opus, resets_at: ro, pct: None },
+            Bar { id: "5h".into(), label: "5h Session".into(), used: u5, limit: cfg.limits.five, resets_at: r5, pct: None },
+            Bar { id: "week".into(), label: "Weekly".into(), used: uw, limit: cfg.limits.week, resets_at: rw, pct: None },
+            Bar { id: "opus".into(), label: "Weekly Opus".into(), used: uo, limit: cfg.limits.opus, resets_at: ro, pct: None },
         ],
     }
 }
@@ -517,11 +565,13 @@ async fn fetch_real_uncached() -> Option<Usage> {
     };
 
     Some(Usage {
+        provider: "claude".into(),
         source: "real".into(),
         updated_at: now_ms(),
         limits: vec![
             Bar {
                 id: "5h".into(),
+                label: "5h Session".into(),
                 used: pct(util_5h),
                 limit: Some(100),
                 resets_at: Some(reset_5h as i64 * 1000),
@@ -529,6 +579,7 @@ async fn fetch_real_uncached() -> Option<Usage> {
             },
             Bar {
                 id: "week".into(),
+                label: "Weekly".into(),
                 used: pct(util_7d),
                 limit: Some(100),
                 resets_at: Some(reset_7d as i64 * 1000),
@@ -536,6 +587,7 @@ async fn fetch_real_uncached() -> Option<Usage> {
             },
             Bar {
                 id: "opus".into(),
+                label: "Weekly Opus".into(),
                 used: opus_pct,
                 limit: Some(100),
                 resets_at: ro,
@@ -545,27 +597,40 @@ async fn fetch_real_uncached() -> Option<Usage> {
     })
 }
 
-#[tauri::command]
-async fn get_usage() -> Usage {
+async fn claude_usage() -> Usage {
     match fetch_real_usage().await {
         Some(real) => real,
         None => compute_estimate(),
     }
 }
 
-/// Raw token counts for the current calendar month and for all of history.
+#[tauri::command]
+async fn get_usage(provider: Option<String>) -> Usage {
+    providers::usage(provider.as_deref().unwrap_or("claude")).await
+}
+
+/// Raw token counts for the current calendar month and for all of history,
+/// or null for a provider that keeps no local token log.
+#[tauri::command]
+fn get_totals(provider: Option<String>) -> Option<Totals> {
+    providers::totals(provider.as_deref().unwrap_or("claude"))
+}
+
+#[tauri::command]
+fn list_providers() -> Vec<providers::Found> {
+    providers::list()
+}
+
 /// Unweighted on purpose: this row answers "how much have I put through it",
 /// not "how close am I to a limit".
-#[tauri::command]
-fn get_totals() -> Totals {
-    let events = all_events();
+fn totals_of(events: &[LogEvent]) -> Totals {
     let this_month = month_key(now_ms());
     let mut t = Totals {
         month_label: this_month.clone(),
         since_label: events.first().map(|e| month_key(e.ts)).unwrap_or_default(),
         ..Default::default()
     };
-    for e in &events {
+    for e in events {
         t.all_time.add(e);
         if month_key(e.ts) == this_month {
             t.month.add(e);
@@ -631,18 +696,21 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
 }
 
 // ── File watcher ────────────────────────────────────────────────────────────
-// Drives both the "Claude is working" animation and the bar refreshes. The
-// events carry no payload: the UI calls get_usage() itself, so an estimate
-// computed here would only be thrown away.
+// Drives both the "agent is working" animation and the bar refreshes, for
+// every provider whose log directory exists. The events carry no usage
+// payload: the UI calls get_usage() itself, so anything computed here would
+// only be thrown away.
 
 fn start_watcher(app: tauri::AppHandle) {
     use notify::{EventKind, RecursiveMode, Watcher};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    let Some(home) = dirs::home_dir() else { return };
-    let projects_dir = home.join(".claude").join("projects");
-    if !projects_dir.exists() {
+    let roots: Vec<providers::WatchRoot> = providers::watch_roots()
+        .into_iter()
+        .filter(|r| r.dir.exists())
+        .collect();
+    if roots.is_empty() {
         return;
     }
 
@@ -651,50 +719,55 @@ fn start_watcher(app: tauri::AppHandle) {
         let Ok(mut watcher) = notify::RecommendedWatcher::new(tx, notify::Config::default()) else {
             return;
         };
-        if watcher.watch(&projects_dir, RecursiveMode::Recursive).is_err() {
-            return;
-        }
+        let roots: Vec<_> = roots
+            .into_iter()
+            .filter(|r| {
+                let mode = if r.recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
+                watcher.watch(&r.dir, mode).is_ok()
+            })
+            .collect();
 
         let long_ago = Instant::now() - Duration::from_secs(3600);
-        let mut last_write = long_ago;
+        let mut last_write = vec![long_ago; roots.len()];
+        let mut working = vec![false; roots.len()];
         let mut last_ping = long_ago;
-        let mut working = false;
         let idle_after = Duration::from_secs(3);
         let heartbeat = Duration::from_secs(60);
 
         loop {
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(Ok(event)) => {
-                    let touched_jsonl = matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    ) && event
-                        .paths
-                        .iter()
-                        .any(|p| p.extension().is_some_and(|x| x == "jsonl"));
-                    if !touched_jsonl {
+                    if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                         continue;
                     }
-                    last_write = Instant::now();
-                    if !working {
-                        working = true;
-                        let _ = app.emit("claude-working", WorkingPayload { active: true });
+                    for (i, r) in roots.iter().enumerate() {
+                        if !event.paths.iter().any(|p| p.starts_with(&r.dir) && (r.matches)(p)) {
+                            continue;
+                        }
+                        last_write[i] = Instant::now();
+                        if !working[i] {
+                            working[i] = true;
+                            let _ = app.emit("agent-working", WorkingPayload { provider: r.provider, active: true });
+                        }
                     }
                 }
                 Ok(Err(_)) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // The burst just ended, so Claude Code produced a full
-                    // response: this is the moment a fresh reading is worth it.
-                    if working && last_write.elapsed() >= idle_after {
-                        working = false;
-                        last_ping = Instant::now();
-                        let _ = app.emit("claude-working", WorkingPayload { active: false });
-                        soft_invalidate();
-                        let _ = app.emit("usage-updated", ());
+                    for (i, r) in roots.iter().enumerate() {
+                        // The burst just ended, so the agent produced a full
+                        // response: this is the moment a fresh reading is worth it.
+                        if working[i] && last_write[i].elapsed() >= idle_after {
+                            working[i] = false;
+                            let _ = app.emit("agent-working", WorkingPayload { provider: r.provider, active: false });
+                            if r.provider == "claude" {
+                                soft_invalidate();
+                            }
+                            let _ = app.emit("usage-updated", UpdatedPayload { provider: Some(r.provider) });
+                        }
                     }
                     if last_ping.elapsed() >= heartbeat {
                         last_ping = Instant::now();
-                        let _ = app.emit("usage-updated", ());
+                        let _ = app.emit("usage-updated", UpdatedPayload { provider: None });
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -712,12 +785,20 @@ pub fn run() {
             get_usage,
             get_config,
             get_totals,
+            list_providers,
             get_autostart,
             set_autostart,
         ])
         .setup(|app| {
             start_watcher(app.handle().clone());
             Ok(())
+        })
+        // Extra pets live in their own windows; closing the main one (from the
+        // taskbar, say) should take the whole app down, not strand them.
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                tauri::Manager::app_handle(window).exit(0);
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Mini Claude");
