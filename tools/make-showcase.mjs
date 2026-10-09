@@ -1,7 +1,10 @@
 // Renders the README artwork straight from the sprite sheet, so the docs can
 // never drift away from what the app actually draws. Run `npm run showcase`.
 //
-// Output: docs/*.gif (one per clip) and docs/poses.png (one frame per clip).
+// Output: docs/*.gif (one per clip), docs/poses.png (one frame per clip),
+// docs/char-<tool>.gif (every character idling, in its default skin) and
+// docs/skins.png (every character in every skin). The characters are drawn
+// by the app's own pixel.js and providers.js, not re-implemented here.
 //
 // Zero dependencies. The GIFs use the "uncompressed LZW" form: every pixel is
 // emitted as a literal and a clear code is sent before the dictionary would
@@ -30,7 +33,8 @@ const PALETTE = [
   [0xf0, 0xee, 0xe6], // 8 p  paper
 ];
 const INDEX = { o: 1, d: 2, e: 3, t: 4, k: 5, g: 6, G: 7, p: 8 };
-const MIN_CODE_SIZE = 4;                 // 16 palette slots is plenty
+// Code size follows the palette: 16 slots for Clawd, 32 for gradient skins.
+const codeSize = (n) => (n > 16 ? 5 : 4);
 
 // ── Sprite sheet ────────────────────────────────────────────────────────────
 const src = await readFile(new URL('../src/frames.js', import.meta.url), 'utf8');
@@ -68,7 +72,7 @@ class Bits {
   flush() { if (this.n) { this.out.push(this.cur); this.cur = 0; this.n = 0; } }
 }
 
-function encodeLiteral(indices) {
+function encodeLiteral(indices, MIN_CODE_SIZE) {
   const clear = 1 << MIN_CODE_SIZE;
   const end = clear + 1;
   const size = MIN_CODE_SIZE + 1;
@@ -97,7 +101,8 @@ function subBlocks(bytes) {
   return Buffer.concat(parts);
 }
 
-function gif(frameNames, delayCs) {
+function gif(frameNames, delayCs, palette = PALETTE, px = pixels) {
+  const MIN_CODE_SIZE = codeSize(palette.length);
   const parts = [];
   parts.push(Buffer.from('GIF89a', 'ascii'));
 
@@ -110,7 +115,7 @@ function gif(frameNames, delayCs) {
   parts.push(lsd);
 
   const table = Buffer.alloc(3 * (1 << MIN_CODE_SIZE));
-  PALETTE.forEach(([r, g, b], i) => { table[i * 3] = r; table[i * 3 + 1] = g; table[i * 3 + 2] = b; });
+  palette.forEach(([r, g, b], i) => { table[i * 3] = r; table[i * 3 + 1] = g; table[i * 3 + 2] = b; });
   parts.push(table);
 
   // loop forever
@@ -134,7 +139,7 @@ function gif(frameNames, delayCs) {
     parts.push(id);
 
     parts.push(Buffer.from([MIN_CODE_SIZE]));
-    parts.push(subBlocks(encodeLiteral(pixels(name))));
+    parts.push(subBlocks(encodeLiteral(px(name), MIN_CODE_SIZE)));
   }
 
   parts.push(Buffer.from([0x3b]));
@@ -223,3 +228,86 @@ POSES.forEach((name, i) => {
 const sheet = png(sheetW, sheetH, rgba);
 await writeFile(`${DOCS}poses.png`, sheet);
 console.log(`docs/poses.png  ${POSES.length} poses  ${(sheet.length / 1024).toFixed(1)} KB`);
+
+// ── Every character ─────────────────────────────────────────────────────────
+// pixel.js runs in a sandbox with just enough of a DOM to load, and its
+// preview() draws onto a fake 1px-per-cell canvas, which hands back exactly
+// the colours the app would paint.
+const app = { CLAWD_FRAMES: FRAMES, CLAWD_GRID: sandbox.window.CLAWD_GRID };
+app.window = app;
+app.document = { readyState: 'complete', getElementById: () => null, addEventListener() {}, hidden: false };
+vm.createContext(app);
+vm.runInContext(await readFile(new URL('../src/pixel.js', import.meta.url), 'utf8'), app);
+const { PROVIDERS } = await import(new URL('../src/providers.js', import.meta.url));
+
+function cells(frame, skin, sprite) {
+  const out = new Array(COLS * ROWS).fill(null);
+  let color = null;
+  const canvas = {
+    width: COLS, height: ROWS,
+    getContext: () => ({
+      clearRect() {},
+      set fillStyle(v) { color = v; },
+      fillRect(x, y) { out[y * COLS + x] = color; },
+    }),
+  };
+  app.clawd.preview(canvas, skin, sprite, frame);
+  return out;
+}
+
+const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+
+function characterGif(p, frames, delay) {
+  const palette = [[0, 0, 0]];
+  const index = new Map();
+  const grids = new Map(frames.map((f) => [f, cells(f, p.skins[0], p.sprite)]));
+  for (const g of grids.values()) {
+    for (const c of g) {
+      if (c && !index.has(c)) { index.set(c, palette.length); palette.push(hex(c)); }
+    }
+  }
+  if (palette.length > 32) throw new Error(`${p.id}: too many colours`);
+  const px = (f) => {
+    const g = grids.get(f);
+    const out = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = g[Math.floor(y / SCALE) * COLS + Math.floor(x / SCALE)];
+        out[y * W + x] = c ? index.get(c) : 0;
+      }
+    }
+    return out;
+  };
+  return gif(frames, delay, palette, px);
+}
+
+// Idle with a blink and a glance cut in, so a still README shows some life.
+const SHOWREEL = [...seq('idle', 6), ...seq('blink', 4), ...seq('idle', 4), ...seq('look', 6)];
+for (const p of PROVIDERS) {
+  const buf = characterGif(p, SHOWREEL, 16);
+  await writeFile(`${DOCS}char-${p.id}.gif`, buf);
+  console.log(`docs/char-${p.id}.gif  ${(buf.length / 1024).toFixed(1)} KB`);
+}
+
+// One row per tool, one column per skin.
+{
+  const most = Math.max(...PROVIDERS.map((p) => p.skins.length));
+  const sw = cellW * most;
+  const sh = cellH * PROVIDERS.length;
+  const out = Buffer.alloc(sw * sh * 4);
+  PROVIDERS.forEach((p, row) => p.skins.forEach((skin, col) => {
+    const g = cells('idle_1', skin, p.sprite);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = g[Math.floor(y / SCALE) * COLS + Math.floor(x / SCALE)];
+        if (!c) continue;
+        const [r, gg, b] = hex(c);
+        const o = ((row * cellH + PAD + y) * sw + col * cellW + PAD + x) * 4;
+        out[o] = r; out[o + 1] = gg; out[o + 2] = b; out[o + 3] = 255;
+      }
+    }
+  }));
+  const buf = png(sw, sh, out);
+  await writeFile(`${DOCS}skins.png`, buf);
+  console.log(`docs/skins.png  ${(buf.length / 1024).toFixed(1)} KB`);
+}

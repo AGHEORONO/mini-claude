@@ -14,6 +14,20 @@
 </p>
 
 <p align="center">
+  <strong>And he has friends.</strong> Codex, Gemini CLI, Qwen Code, opencode and
+  GitHub Copilot CLI each get a pet of their own, with their own limits.
+</p>
+
+<p align="center">
+  <img src="docs/char-claude.gif" width="72" alt="Clawd, the orange Claude Code pet">
+  <img src="docs/char-codex.gif" width="72" alt="The Codex pet, a little white cloud with a green prompt for a mouth">
+  <img src="docs/char-gemini.gif" width="72" alt="The Gemini pet, a four-point sparkle fading from blue to rose">
+  <img src="docs/char-qwen.gif" width="72" alt="The Qwen pet, a brown capybara in a white T-shirt">
+  <img src="docs/char-opencode.gif" width="72" alt="The opencode pet, a pale block robot with a dark screen for a face">
+  <img src="docs/char-copilot.gif" width="72" alt="The Copilot pet, a purple pilot in flying goggles">
+</p>
+
+<p align="center">
   <strong>~40 MB of RAM. Under 5% of one CPU core when idle.</strong><br>
   Tauri v2 + Rust backend, vanilla HTML/CSS/JS frontend. No framework, no bundler.
 </p>
@@ -66,18 +80,53 @@ when a session starts writing and picks one of five working animations.
   minutes and he takes himself off to the side and starts crying.
 - **Show usage** — the panel, same as left-clicking him.
 - **Pause motion** — freezes him completely. Remembered between runs.
+- **Pets & skins…** — which tools get a pet, and what each one wears.
 
 <br clear="right">
 
-### Other AI CLIs, and skins
+### The whole crew
 
 Right-click → **Pets & skins…** to choose which tools get a pet. Each ticked
-tool opens its own little window, lined up along the bottom of the screen, and
-each one is its own little creature: a cloud with a `_` mouth for Codex, the
-sparkle for Gemini, a capybara in a T-shirt for Qwen, a block bot for opencode,
-and a pilot in goggles for Copilot. Every character borrows its poses from
-Clawd's frames, so all the moods and work animations work for all of them, and
-each has several skins to choose from.
+tool opens its own little window, lined up along the bottom of the screen.
+Only one of them has an official mascot (Qwen's capybara), so the others are
+drawn from what each tool is known for:
+
+| | Tool | Character |
+|---|---|---|
+| <img src="docs/char-claude.gif" width="64" alt=""> | **Claude Code** | **Clawd**, the original |
+| <img src="docs/char-codex.gif" width="64" alt=""> | **Codex** | a little **cloud** with a `_` prompt for a mouth, after Codex's cloud-and-terminal icon |
+| <img src="docs/char-gemini.gif" width="64" alt=""> | **Gemini CLI** | the four-point **sparkle**, in Gemini's blue-to-rose sweep |
+| <img src="docs/char-qwen.gif" width="64" alt=""> | **Qwen Code** | a **capybara** in a white T-shirt, Qwen's own mascot |
+| <img src="docs/char-opencode.gif" width="64" alt=""> | **opencode** | a monochrome **block bot** with a screen for a face and a blinking cursor |
+| <img src="docs/char-copilot.gif" width="64" alt=""> | **Copilot CLI** | a **pilot in flying goggles**, after the CLI's welcome art |
+
+Each new character has one hand-drawn resting pose and borrows every other pose
+from Clawd's frames: blinking, glancing, dozing, sitting, crying, the laptop,
+the papers, being carried. So all the moods and work animations above work for
+every one of them.
+
+<table>
+<tr>
+<td width="55%" valign="top">
+
+**Skins.** Every character comes in several, from Clawd's *Midnight* and
+*Sakura* to Codex's *Terminal* (scanlines and phosphor-green eyes), Gemini's
+*Twilight*, a capybara in a *Violet tee*, and Copilot's GitHub-dark *Octo*.
+Pick one per pet in the same panel; every pet window picks up the change at
+once.
+
+<img src="docs/skins.png" width="360" alt="All characters in all their skins: Clawd in classic, midnight, ghost, sakura and gold; the Codex cloud in cloud, terminal, storm and dawn; the Gemini sparkle in aurora, twilight, sky and star; the Qwen capybara in capy, choco, violet tee and snow; the opencode bot in mono, ink and amber; the Copilot pilot in pilot, octo and sprout">
+
+</td>
+<td width="45%" valign="top">
+
+<img src="docs/settings.png" width="260" alt="The Pets and skins panel: a card per tool with a checkbox, whether the tool was found on this machine, and a row of skin swatches">
+
+</td>
+</tr>
+</table>
+
+#### Where each pet's numbers come from
 
 | Tool | Bars | Where the numbers come from |
 |---|---|---|
